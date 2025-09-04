@@ -1,0 +1,37 @@
+# SPDX-FileCopyrightText: 2025 2025 Chen Linxuan <me@black-desk.cn>
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+[package]
+name = "git-backport"
+version = "0.1.0"
+edition = "2021"
+description = "A simple git command-line extension for backport process"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/black-desk/git-backport"
+homepage = "https://github.com/black-desk/git-backport"
+authors = ["Chen Linxuan <me@black-desk.cn>"]
+
+[[bin]]
+name = "git-bp"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.5.47", features = ["derive"] }
+env_logger = "0.11.8"
+
+[package.metadata.deb]
+maintainer = "Chen Linxuan <me@black-desk.cn>"
+copyright = "2025, Chen Linxuan <me@black-desk.cn>"
+license-file = ["LICENSES/GPL-3.0-or-later.txt", "5"]
+extended-description = """\
+A simple git command-line extension that provides commonly used features \
+during the backport process. Includes vim plugin support for enhanced \
+commit file editing."""
+depends = "$auto"
+section = "devel"
+priority = "optional"
+assets = [
+    "$auto",
+    ["vim/ftplugin/gitbackportcommits.vim", "usr/share/vim/vimfiles/ftplugin/", "644"],
+]
