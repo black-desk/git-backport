@@ -42,39 +42,46 @@ pub fn command(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         debug!("Processing commit: {} {:?} {:?}",
                commit.hash, commit.change_id, commit.title);
 
-        // Find original commit on ref branch
-        if let Some(original_commit) = find_original_commit(&commit, &args.ref_branch)? {
-            debug!("Found original commit for {}: {}", commit.hash, original_commit);
-
-            // Search for fixes on ref branch
-            let fixes = find_fixes_for_commit(&original_commit, &args.ref_branch)?;
-
-            if !fixes.is_empty() {
-                debug!("Found {} fix(es) for {}: {:?}", fixes.len(), original_commit, fixes);
-                for fix_commit in fixes {
-                    fix_commits.push(fix_commit);
-                }
-            }
-
-            // Check for references that are not explicit fixes
-            let references = find_references_for_commit(&original_commit, &args.ref_branch)?;
-            debug!("Found {} references for {}: {:?}", references.len(), original_commit, references);
-            for reference in references {
-                debug!("Checking if reference {} is an explicit fix for {}", reference, original_commit);
-                if !is_explicit_fix(&reference, &original_commit)? {
-                    if let Some(ref_title) = get_commit_title(&reference)? {
-                        warn!("Commit {} references {} but is not marked as a fix: {}",
-                              reference, original_commit, ref_title);
-                    } else {
-                        warn!("Commit {} references {} but is not marked as a fix",
-                              reference, original_commit);
-                    }
-                } else {
-                    debug!("Reference {} is an explicit fix, skipping warning", reference);
-                }
-            }
+        // Find all original commits on ref branch
+        let original_commits = find_all_original_commits(&commit, &args.ref_branch)?;
+        
+        if original_commits.is_empty() {
+            debug!("Could not find any original commits for {} on {}", commit.hash, args.ref_branch);
         } else {
-            debug!("Could not find original commit for {} on {}", commit.hash, args.ref_branch);
+            debug!("Found {} original commit(s) for {}: {:?}", original_commits.len(), commit.hash, original_commits);
+            
+            // Search for fixes for each original commit
+            for original_commit in &original_commits {
+                debug!("Processing original commit: {}", original_commit);
+                
+                // Search for fixes on ref branch
+                let fixes = find_fixes_for_commit(original_commit, &args.ref_branch)?;
+
+                if !fixes.is_empty() {
+                    debug!("Found {} fix(es) for {}: {:?}", fixes.len(), original_commit, fixes);
+                    for fix_commit in fixes {
+                        fix_commits.push(fix_commit);
+                    }
+                }
+
+                // Check for references that are not explicit fixes
+                let references = find_references_for_commit(original_commit, &args.ref_branch)?;
+                debug!("Found {} references for {}: {:?}", references.len(), original_commit, references);
+                for reference in references {
+                    debug!("Checking if reference {} is an explicit fix for {}", reference, original_commit);
+                    if !is_explicit_fix(&reference, original_commit)? {
+                        if let Some(ref_title) = get_commit_title(&reference)? {
+                            warn!("Commit {} references {} but is not marked as a fix: {}",
+                                  reference, original_commit, ref_title);
+                        } else {
+                            warn!("Commit {} references {} but is not marked as a fix",
+                                  reference, original_commit);
+                        }
+                    } else {
+                        debug!("Reference {} is an explicit fix, skipping warning", reference);
+                    }
+                }
+            }
         }
     }
 
@@ -109,32 +116,33 @@ fn get_commits_in_range(base: &str, head: &str) -> Result<Vec<CommitInfo>, Box<d
     Ok(commits)
 }
 
-/// Find the original commit on ref branch based on change-id or was-change-id
-fn find_original_commit(commit: &CommitInfo, ref_branch: &str) -> Result<Option<String>, Box<dyn std::error::Error>> {
-    let mut found_original = None;
+/// Find all original commits on ref branch based on change-id and was-change-ids
+fn find_all_original_commits(commit: &CommitInfo, ref_branch: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    let mut found_originals = Vec::new();
     
     // Try to find by change-id first
     if let Some(change_id) = &commit.change_id {
         if let Some(original) = find_commit_by_change_id(change_id, ref_branch)? {
             debug!("Found original commit using change-id: {}", change_id);
-            found_original = Some(original);
+            found_originals.push(original);
         }
     }
 
-    // Always try to find by was-change-ids regardless of whether change-id found something
+    // Always try to find by was-change-ids - each represents a separate original commit
     let was_change_ids = get_was_change_ids(&commit.hash)?;
     for was_change_id in was_change_ids {
         if let Some(original) = find_commit_by_change_id(&was_change_id, ref_branch)? {
             debug!("Found original commit using was-change-id: {}", was_change_id);
-            if found_original.is_none() {
-                found_original = Some(original);
+            // Check for duplicates before adding
+            if !found_originals.contains(&original) {
+                found_originals.push(original);
             } else {
-                debug!("Multiple original commits found, keeping the first one from change-id");
+                debug!("Duplicate original commit {} found, skipping", original);
             }
         }
     }
 
-    Ok(found_original)
+    Ok(found_originals)
 }
 
 /// Find commit by change-id on specified branch
