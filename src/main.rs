@@ -26,6 +26,8 @@ enum Commands {
     Pick(commands::pick::Args),
     /// Install vim syntax support files
     Vim(commands::vim::Args),
+    /// Find fixes for commits on a reference branch
+    Fix(commands::fix::Args),
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -42,6 +44,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         Commands::Vim(args) => {
             commands::vim::command(args)?;
+        }
+        Commands::Fix(args) => {
+            commands::fix::command(args)?;
         }
     }
 

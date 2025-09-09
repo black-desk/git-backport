@@ -7,3 +7,4 @@
 pub mod sort;
 pub mod pick;
 pub mod vim;
+pub mod fix;
