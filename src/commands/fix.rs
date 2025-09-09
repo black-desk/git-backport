@@ -175,23 +175,32 @@ fn get_was_change_id(commit_hash: &str) -> Result<Option<String>, Box<dyn std::e
 fn find_fixes_for_commit(original_commit: &str, ref_branch: &str) -> Result<Vec<CommitInfo>, Box<dyn std::error::Error>> {
     debug!("Searching for fixes for commit: {} on branch: {}", original_commit, ref_branch);
 
-    // Get all commits on the ref branch
+    // Search for commits that contain "Fixes: <commit_hash>" pattern
+    // Only search commits that come after the original commit (since fixes can't appear before)
+    let range = format!("{}..{}", original_commit, ref_branch);
+    
+    // Try both full hash and short hash patterns
+    let short_hash = &original_commit[..std::cmp::min(12, original_commit.len())];
+    
+    debug!("Searching for fix patterns in range: {}", range);
+    
     let output = Command::new("git")
-        .args(["log", "--format=%H", ref_branch])
+        .args([
+            "log", 
+            "--format=%H", 
+            "--grep", &format!("Fixes: {}", original_commit),
+            "--grep", &format!("Fixes: {}", short_hash),
+            &range
+        ])
         .output()?;
 
-    if !output.status.success() {
-        return Ok(Vec::new());
-    }
-
-    let commits_text = String::from_utf8_lossy(&output.stdout);
     let mut fix_commits = Vec::new();
 
-    for line in commits_text.lines() {
-        let line = line.trim();
-        if !line.is_empty() {
-            debug!("Checking if {} is a fix for {}", line, original_commit);
-            if is_explicit_fix(line, original_commit)? {
+    if output.status.success() {
+        let commits_text = String::from_utf8_lossy(&output.stdout);
+        for line in commits_text.lines() {
+            let line = line.trim();
+            if !line.is_empty() {
                 let mut commit_info = CommitInfo::from_hash(line.to_string());
                 commit_info.fetch_change_id_if_missing()?;
                 commit_info.fetch_title_if_missing()?;
@@ -212,11 +221,28 @@ fn find_references_for_commit(original_commit: &str, ref_branch: &str) -> Result
 
     debug!("Searching for references using full hash: {} and short hash: {}", original_commit, short_hash);
 
+    // Only search commits that come after the original commit (since references can't appear before)
+    let range = format!("{}..{}", original_commit, ref_branch);
     let mut all_references = Vec::new();
 
-    // Search with full hash
+    // Search with both full hash and short hash in one git command
+    let mut args = vec![
+        "log".to_string(),
+        "--format=%H".to_string(),
+        "--grep".to_string(),
+        original_commit.to_string(),
+    ];
+
+    // Add short hash pattern if it's different from full hash
+    if short_hash != original_commit {
+        args.push("--grep".to_string());
+        args.push(short_hash.to_string());
+    }
+
+    args.push(range);
+
     let output = Command::new("git")
-        .args(["log", "--format=%H", "--grep", original_commit, ref_branch])
+        .args(&args)
         .output()?;
 
     if output.status.success() {
@@ -225,23 +251,6 @@ fn find_references_for_commit(original_commit: &str, ref_branch: &str) -> Result
             let line = line.trim();
             if !line.is_empty() {
                 all_references.push(line.to_string());
-            }
-        }
-    }
-
-    // Search with short hash if different from full hash
-    if short_hash != original_commit {
-        let output = Command::new("git")
-            .args(["log", "--format=%H", "--grep", short_hash, ref_branch])
-            .output()?;
-
-        if output.status.success() {
-            let commits_text = String::from_utf8_lossy(&output.stdout);
-            for line in commits_text.lines() {
-                let line = line.trim();
-                if !line.is_empty() && !all_references.contains(&line.to_string()) {
-                    all_references.push(line.to_string());
-                }
             }
         }
     }
