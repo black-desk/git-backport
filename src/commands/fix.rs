@@ -55,7 +55,7 @@ pub fn command(args: Args) -> Result<(), Box<dyn std::error::Error>> {
                 debug!("Processing original commit: {}", original_commit);
 
                 // Search for fixes on ref branch
-                let fixes = find_fixes_for_commit(original_commit, &args.ref_branch)?;
+                let fixes = find_fixes_for_commit(original_commit, &args.ref_branch, &args.base)?;
 
                 if !fixes.is_empty() {
                     debug!("Found {} fix(es) for {}: {:?}", fixes.len(), original_commit, fixes);
@@ -84,6 +84,12 @@ pub fn command(args: Args) -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
+
+    // Remove duplicates based on hash
+    fix_commits.sort_by(|a, b| a.hash.cmp(&b.hash));
+    fix_commits.dedup_by(|a, b| a.hash == b.hash);
+
+    debug!("Final fix commits count after deduplication: {}", fix_commits.len());
 
     // Generate commits file format and output to stdout
     output_commits_file(&fix_commits)?;
@@ -197,8 +203,69 @@ fn get_was_change_ids(commit_hash: &str) -> Result<Vec<String>, Box<dyn std::err
     Ok(was_change_ids)
 }
 
+/// Check if a commit already exists on current branch through various means:
+/// 1. Direct hash ancestry check
+/// 2. Same Change-Id check  
+/// 3. Cherry-pick trace check
+fn is_commit_already_applied(commit_info: &CommitInfo, base: &str) -> Result<bool, Box<dyn std::error::Error>> {
+    // 1. Check direct ancestry
+    let args = ["merge-base", "--is-ancestor", &commit_info.hash, "HEAD"];
+    debug!("Running command: git {}", args.join(" "));
+    let output = Command::new("git")
+        .args(args)
+        .output()?;
+    
+    if output.status.success() {
+        debug!("Commit {} is already an ancestor of HEAD", commit_info.hash);
+        return Ok(true);
+    }
+
+    // 2. Check by Change-Id if available
+    if let Some(change_id) = &commit_info.change_id {
+        let range = format!("{}..HEAD", base);
+        let grep_pattern = format!("Change-Id: {}", change_id);
+        let args = ["log", "--format=%H", "--grep", &grep_pattern, &range];
+        debug!("Running command: git {}", args.join(" "));
+        let output = Command::new("git")
+            .args(args)
+            .output()?;
+        
+        if output.status.success() {
+            let commits_text = String::from_utf8_lossy(&output.stdout);
+            if !commits_text.trim().is_empty() {
+                debug!("Commit with Change-Id {} already exists on current branch", change_id);
+                return Ok(true);
+            }
+        }
+    }
+
+    // 3. Check cherry-pick records
+    let short_hash = &commit_info.hash[..std::cmp::min(7, commit_info.hash.len())];
+    let range = format!("{}..HEAD", base);
+    
+    // Search for cherry-pick pattern with both short and long hash
+    for hash_to_check in [commit_info.hash.as_str(), short_hash] {
+        let grep_pattern = format!("cherry picked from commit {}", hash_to_check);
+        let args = ["log", "--format=%H", "--grep", &grep_pattern, &range];
+        debug!("Running command: git {}", args.join(" "));
+        let output = Command::new("git")
+            .args(args)
+            .output()?;
+        
+        if output.status.success() {
+            let commits_text = String::from_utf8_lossy(&output.stdout);
+            if !commits_text.trim().is_empty() {
+                debug!("Commit {} was cherry-picked to current branch", commit_info.hash);
+                return Ok(true);
+            }
+        }
+    }
+
+    Ok(false)
+}
+
 /// Find commits that fix the given commit
-fn find_fixes_for_commit(original_commit: &str, ref_branch: &str) -> Result<Vec<CommitInfo>, Box<dyn std::error::Error>> {
+fn find_fixes_for_commit(original_commit: &str, ref_branch: &str, base: &str) -> Result<Vec<CommitInfo>, Box<dyn std::error::Error>> {
     debug!("Searching for fixes for commit: {} on branch: {}", original_commit, ref_branch);
 
     // Search for commits that contain "Fixes: <commit_hash>" pattern
@@ -232,6 +299,13 @@ fn find_fixes_for_commit(original_commit: &str, ref_branch: &str) -> Result<Vec<
                 let mut commit_info = CommitInfo::from_hash(line.to_string());
                 commit_info.fetch_change_id_if_missing()?;
                 commit_info.fetch_title_if_missing()?;
+                
+                // Check if this fix commit is already applied on current branch
+                if is_commit_already_applied(&commit_info, base)? {
+                    debug!("Fix commit {} already applied on current branch, skipping", line);
+                    continue;
+                }
+                
                 fix_commits.push(commit_info);
                 debug!("Found fix commit: {} for {}", line, original_commit);
             }
