@@ -206,7 +206,7 @@ fn find_fixes_for_commit(original_commit: &str, ref_branch: &str) -> Result<Vec<
     let range = format!("{}..{}", original_commit, ref_branch);
 
     // Use short hash since it will match both short and long hash patterns in commit messages
-    let short_hash = &original_commit[..std::cmp::min(12, original_commit.len())];
+    let short_hash = &original_commit[..std::cmp::min(7, original_commit.len())];
 
     debug!("Searching for fix pattern 'Fixes: {}' in range: {}", short_hash, range);
 
@@ -243,7 +243,7 @@ fn find_fixes_for_commit(original_commit: &str, ref_branch: &str) -> Result<Vec<
 }/// Find commits that reference the given commit (but may not be explicit fixes)
 fn find_references_for_commit(original_commit: &str, ref_branch: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     // Use short hash since it will match both short and long hash patterns in commit messages
-    let short_hash = &original_commit[..std::cmp::min(12, original_commit.len())];
+    let short_hash = &original_commit[..std::cmp::min(7, original_commit.len())];
 
     debug!("Searching for references using short hash: {}", short_hash);
 
