@@ -111,23 +111,30 @@ fn get_commits_in_range(base: &str, head: &str) -> Result<Vec<CommitInfo>, Box<d
 
 /// Find the original commit on ref branch based on change-id or was-change-id
 fn find_original_commit(commit: &CommitInfo, ref_branch: &str) -> Result<Option<String>, Box<dyn std::error::Error>> {
+    let mut found_original = None;
+    
+    // Try to find by change-id first
     if let Some(change_id) = &commit.change_id {
-        // First try to find by change-id
         if let Some(original) = find_commit_by_change_id(change_id, ref_branch)? {
-            return Ok(Some(original));
+            debug!("Found original commit using change-id: {}", change_id);
+            found_original = Some(original);
         }
     }
 
-    // Try to find by was-change-ids (try all of them)
+    // Always try to find by was-change-ids regardless of whether change-id found something
     let was_change_ids = get_was_change_ids(&commit.hash)?;
     for was_change_id in was_change_ids {
         if let Some(original) = find_commit_by_change_id(&was_change_id, ref_branch)? {
             debug!("Found original commit using was-change-id: {}", was_change_id);
-            return Ok(Some(original));
+            if found_original.is_none() {
+                found_original = Some(original);
+            } else {
+                debug!("Multiple original commits found, keeping the first one from change-id");
+            }
         }
     }
 
-    Ok(None)
+    Ok(found_original)
 }
 
 /// Find commit by change-id on specified branch
